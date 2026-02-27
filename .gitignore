@@ -10,15 +10,15 @@ __pycache__/
 # Build artifacts and generated binaries
 build/
 snapshots/
-projects/quantum_portal/quantum_portal
-projects/quantum_portal/quantum_portal.hex
-projects/quantum_portal/quantum_portal.bits.txt
-projects/quantum_portal/snapshots/
+#projects/quantum_portal/quantum_portal  (bin ignore)
+projects/quantum_portal/quantum_portal.hex  # Track for rebuild
+projects/quantum_portal/quantum_portal.bits.txt  # Track dataset
+projects/quantum_portal/snapshots/  # Track versions
 grokdoc
 grokdoc.hex
-tools/grokdoc/grokdoc
-tools/grokdoc/grokdoc.hex
-tools/grokdoc/grokdoc.bits.txt
+# tools/grokdoc/grokdoc  (track asm/hex/sources; rebuild bin)
+# tools/grokdoc/grokdoc.hex
+# tools/grokdoc/grokdoc.bits.txt
 
 # Generated markdown outputs
 grok-*.md
@@ -44,3 +44,4 @@ dummy_xai.key
 test_minimal
 test_minimal*
 quantum_portal_merged.asm
+archive/
