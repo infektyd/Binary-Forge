@@ -777,7 +777,7 @@ req_a: db '{"model":"',0
 req_b: db '","messages":[{"role":"user","content":"',0
 req_c: db '"}]}',0
 
-fallback_model: db 'grok-4-1-fast',0
+fallback_model: db 'grok-4-1-fast-1-fast',0
 
 path_models_json: db '/tmp/qp_models.json',0
 path_req_json: db '/tmp/qp_req.json',0

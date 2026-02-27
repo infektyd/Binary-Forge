@@ -69,7 +69,7 @@ section .data
     gemini_endpoint db "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=DUMMY_GEMINI", 0
     gemini_auth db "", 0
 
-    prompt db "{\"model\": \"grok-4\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}", 0
+    prompt db "{\"model\": \"grok-4-1-fast\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}", 0
     prompt_len equ $ - prompt
 
     resp_buf times 1024 db 0
