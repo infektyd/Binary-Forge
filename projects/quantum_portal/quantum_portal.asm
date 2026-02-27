@@ -1,0 +1,798 @@
+bits 64
+org 0x400000
+
+ehdr:
+    db 0x7f, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    dw 2
+    dw 62
+    dd 1
+    dq _start
+    dq phdr - $$
+    dq 0
+    dd 0
+    dw 64
+    dw 56
+    dw 1
+    dw 0
+    dw 0
+    dw 0
+
+phdr:
+    dd 1
+    dd 5
+    dq 0
+    dq $$
+    dq $$
+    dq filesize
+    dq filesize
+    dq 0x1000
+
+%define OFF_WINSZ       0x000
+%define OFF_TMP         0x040
+%define OFF_INPUT       0x100
+%define OFF_MODEL_JSON  0x600
+%define OFF_RESP_JSON   0x2600
+%define OFF_REQ_JSON    0x6600
+%define OFF_MODEL_SLOTS 0x7e00
+%define OFF_SEL_MODEL   0x8100
+%define OFF_RESP_TEXT   0x8200
+%define STACK_SIZE      0x9800
+
+_start:
+    sub rsp, STACK_SIZE
+    mov r14, rsp
+
+    call get_winsize
+    call render_layout
+
+    lea rdi, [rel cmd_fetch_models]
+    call run_shell
+
+    lea rdi, [rel path_models_json]
+    lea rsi, [r14 + OFF_MODEL_JSON]
+    mov edx, 0x1f00
+    call read_file
+    mov r13, rax
+
+    test r13, r13
+    jle .models_fallback
+    lea rsi, [r14 + OFF_MODEL_JSON]
+    mov rcx, r13
+    call parse_models
+    jmp .models_ready
+
+.models_fallback:
+    lea rdi, [r14 + OFF_MODEL_SLOTS]
+    lea rsi, [rel fallback_model]
+    call copy_z
+    mov r12d, 1
+
+.models_ready:
+    call show_models
+    call choose_model
+
+    call choose_or_prompt
+    test eax, eax
+    jle .exit_ok
+
+    call build_request_json
+    mov r12, rax
+
+    lea rdi, [rel path_req_json]
+    lea rsi, [r14 + OFF_REQ_JSON]
+    mov rdx, r12
+    call write_file
+
+    lea rdi, [rel cmd_chat]
+    call run_shell
+
+    lea rdi, [rel path_resp_json]
+    lea rsi, [r14 + OFF_RESP_JSON]
+    mov edx, 0x3a00
+    call read_file
+    test rax, rax
+    jg .have_resp
+
+    lea rdi, [r14 + OFF_RESP_TEXT]
+    lea rsi, [rel msg_chat_failed]
+    call copy_z
+    jmp .render
+
+.have_resp:
+    mov r13, rax
+    lea rsi, [r14 + OFF_RESP_JSON]
+    mov rcx, r13
+    lea rdi, [r14 + OFF_RESP_TEXT]
+    call extract_content
+
+.render:
+    call render_response
+
+.exit_ok:
+    xor edi, edi
+    mov eax, 60
+    syscall
+
+; ---------------- UI ----------------
+
+get_winsize:
+    mov eax, 16
+    mov edi, 1
+    mov esi, 0x5413
+    lea rdx, [r14 + OFF_WINSZ]
+    syscall
+    test eax, eax
+    jns .ok
+    mov word [r14 + OFF_WINSZ], 30
+    mov word [r14 + OFF_WINSZ + 2], 120
+.ok:
+    ret
+
+render_layout:
+    lea rsi, [rel ansi_clear]
+    call write_stdout_z
+
+    rdtsc
+    and eax, 3
+    cmp eax, 1
+    je .s2
+    cmp eax, 2
+    je .s3
+    lea rsi, [rel stars_1]
+    call write_stdout_z
+    jmp .stars_done
+.s2:
+    lea rsi, [rel stars_2]
+    call write_stdout_z
+    jmp .stars_done
+.s3:
+    lea rsi, [rel stars_3]
+    call write_stdout_z
+.stars_done:
+
+    lea rsi, [rel hdr_title]
+    call write_stdout_z
+
+    movzx eax, word [r14 + OFF_WINSZ + 2]
+    cmp eax, 110
+    jb .compact
+
+    lea rsi, [rel frame_wide]
+    call write_stdout_z
+    lea rsi, [rel sidebar_conv]
+    call write_stdout_z
+    ret
+
+.compact:
+    lea rsi, [rel frame_compact]
+    call write_stdout_z
+    lea rsi, [rel sidebar_conv_compact]
+    call write_stdout_z
+    ret
+
+show_models:
+    lea rsi, [rel model_hdr]
+    call write_stdout_z
+
+    xor r8d, r8d
+.loop:
+    cmp r8d, r12d
+    jae .done
+
+    mov al, '0'
+    inc al
+    add al, r8b
+    mov [r14 + OFF_TMP], al
+    mov byte [r14 + OFF_TMP + 1], ')'
+    mov byte [r14 + OFF_TMP + 2], ' '
+    mov byte [r14 + OFF_TMP + 3], 0
+    lea rsi, [r14 + OFF_TMP]
+    call write_stdout_z
+
+    mov eax, r8d
+    imul eax, 64
+    lea rsi, [r14 + OFF_MODEL_SLOTS]
+    add rsi, rax
+    call write_stdout_z
+
+    lea rsi, [rel nl]
+    call write_stdout_z
+
+    inc r8d
+    jmp .loop
+.done:
+    ret
+
+choose_model:
+    lea rsi, [rel prompt_model]
+    call write_stdout_z
+
+    lea rdi, [r14 + OFF_TMP + 8]
+    mov edx, 16
+    call read_line
+
+    xor ebx, ebx
+    mov al, [r14 + OFF_TMP + 8]
+    cmp al, '1'
+    jb .sel_ok
+    cmp al, '8'
+    ja .sel_ok
+    sub al, '1'
+    mov bl, al
+
+.sel_ok:
+    cmp ebx, r12d
+    jb .copy
+    xor ebx, ebx
+
+.copy:
+    mov eax, ebx
+    imul eax, 64
+    lea rsi, [r14 + OFF_MODEL_SLOTS]
+    add rsi, rax
+    lea rdi, [r14 + OFF_SEL_MODEL]
+    call copy_z
+
+    lea rsi, [rel selected_prefix]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_SEL_MODEL]
+    call write_stdout_z
+    lea rsi, [rel nl]
+    call write_stdout_z
+
+    lea rdi, [rel path_model_tmp]
+    lea rsi, [r14 + OFF_SEL_MODEL]
+    call strlen_z
+    mov rdx, rax
+    call write_file
+
+    lea rdi, [rel cmd_save_model]
+    call run_shell
+    ret
+
+choose_or_prompt:
+    lea rsi, [rel prompt_chat]
+    call write_stdout_z
+
+    lea rdi, [r14 + OFF_INPUT]
+    mov edx, 900
+    call read_line
+    test eax, eax
+    jle .ret
+
+    cmp eax, 1
+    jne .ret
+
+    mov al, [r14 + OFF_INPUT]
+    cmp al, '1'
+    je .c1
+    cmp al, '2'
+    je .c2
+    cmp al, '3'
+    je .c3
+    cmp al, '4'
+    je .c4
+    jmp .ret
+
+.c1:
+    lea rdi, [r14 + OFF_INPUT]
+    lea rsi, [rel conv_prompt_1]
+    call copy_z
+    jmp .fixlen
+.c2:
+    lea rdi, [r14 + OFF_INPUT]
+    lea rsi, [rel conv_prompt_2]
+    call copy_z
+    jmp .fixlen
+.c3:
+    lea rdi, [r14 + OFF_INPUT]
+    lea rsi, [rel conv_prompt_3]
+    call copy_z
+    jmp .fixlen
+.c4:
+    lea rdi, [r14 + OFF_INPUT]
+    lea rsi, [rel conv_prompt_4]
+    call copy_z
+
+.fixlen:
+    lea rsi, [r14 + OFF_INPUT]
+    call strlen_z
+.ret:
+    ret
+
+render_response:
+    call render_layout
+
+    lea rsi, [rel pos_selected]
+    call write_stdout_z
+    lea rsi, [rel selected_prefix]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_SEL_MODEL]
+    call write_stdout_z
+
+    lea rsi, [rel pos_chat_user]
+    call write_stdout_z
+    lea rsi, [rel chat_user_hdr]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_INPUT]
+    call write_stdout_z
+
+    lea rsi, [rel pos_chat_ai]
+    call write_stdout_z
+    lea rsi, [rel chat_ai_hdr]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_RESP_TEXT]
+    call write_stdout_z
+
+    lea rsi, [rel pos_canvas]
+    call write_stdout_z
+    lea rsi, [rel canvas_hdr]
+    call write_stdout_z
+    lea rsi, [rel md_prompt]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_INPUT]
+    call write_stdout_z
+    lea rsi, [rel md_resp]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_RESP_TEXT]
+    call write_stdout_z
+
+    lea rsi, [rel ansi_reset]
+    call write_stdout_z
+    ret
+
+; ---------------- request + response ----------------
+
+build_request_json:
+    lea rdi, [r14 + OFF_REQ_JSON]
+
+    lea rsi, [rel req_a]
+    call append_z
+
+    lea rsi, [r14 + OFF_SEL_MODEL]
+    call append_z
+
+    lea rsi, [rel req_b]
+    call append_z
+
+    lea rsi, [r14 + OFF_INPUT]
+.msg_loop:
+    mov al, [rsi]
+    test al, al
+    jz .msg_done
+    cmp al, 34
+    je .space
+    cmp al, 92
+    je .space
+    cmp al, 10
+    je .space
+    cmp al, 13
+    je .space
+    cmp al, 32
+    jb .space
+    jmp .store
+.space:
+    mov al, 32
+.store:
+    mov [rdi], al
+    inc rdi
+    inc rsi
+    jmp .msg_loop
+.msg_done:
+    mov byte [rdi], 0
+
+    lea rsi, [rel req_c]
+    call append_z
+
+    lea rsi, [r14 + OFF_REQ_JSON]
+    call strlen_z
+    ret
+
+extract_content:
+    ; in: rsi=json, rcx=len, rdi=out
+.find:
+    cmp rcx, 11
+    jb .fallback
+
+    cmp byte [rsi], '"'
+    jne .next
+    cmp byte [rsi+1], 'c'
+    jne .next
+    cmp byte [rsi+2], 'o'
+    jne .next
+    cmp byte [rsi+3], 'n'
+    jne .next
+    cmp byte [rsi+4], 't'
+    jne .next
+    cmp byte [rsi+5], 'e'
+    jne .next
+    cmp byte [rsi+6], 'n'
+    jne .next
+    cmp byte [rsi+7], 't'
+    jne .next
+    cmp byte [rsi+8], '"'
+    jne .next
+    cmp byte [rsi+9], ':'
+    jne .next
+    cmp byte [rsi+10], '"'
+    jne .next
+
+    add rsi, 11
+    sub rcx, 11
+    xor r8d, r8d
+.copy:
+    test rcx, rcx
+    jz .done
+    mov al, [rsi]
+    cmp al, '"'
+    je .done
+    cmp al, 92
+    jne .plain
+    cmp rcx, 1
+    jbe .done
+    mov al, [rsi+1]
+    cmp al, 'n'
+    jne .escape_other
+    mov al, 10
+    add rsi, 2
+    sub rcx, 2
+    jmp .put
+.escape_other:
+    add rsi, 2
+    sub rcx, 2
+    jmp .put
+.plain:
+    inc rsi
+    dec rcx
+.put:
+    cmp r8d, 3000
+    jae .done
+    mov [rdi+r8], al
+    inc r8
+    jmp .copy
+.done:
+    mov byte [rdi+r8], 0
+    ret
+
+.next:
+    inc rsi
+    dec rcx
+    jmp .find
+
+.fallback:
+    lea rsi, [rel msg_no_content]
+    call copy_z
+    ret
+
+; ---------------- parse model ids ----------------
+
+parse_models:
+    ; in: rsi=buffer rcx=len, out: r12d=count
+    xor r12d, r12d
+
+.scan:
+    cmp rcx, 6
+    jbe .done
+    cmp r12d, 8
+    jae .done
+
+    cmp byte [rsi], '"'
+    jne .advance
+    cmp byte [rsi+1], 'i'
+    jne .advance
+    cmp byte [rsi+2], 'd'
+    jne .advance
+    cmp byte [rsi+3], '"'
+    jne .advance
+    cmp byte [rsi+4], ':'
+    jne .advance
+    cmp byte [rsi+5], '"'
+    jne .advance
+
+    add rsi, 6
+    sub rcx, 6
+
+    mov eax, r12d
+    imul eax, 64
+    lea rdi, [r14 + OFF_MODEL_SLOTS]
+    add rdi, rax
+    xor ebx, ebx
+
+.copy_id:
+    test rcx, rcx
+    jz .end_one
+    mov al, [rsi]
+    cmp al, '"'
+    je .end_quote
+    cmp ebx, 63
+    jae .skip_store
+    mov [rdi+rbx], al
+    inc ebx
+.skip_store:
+    inc rsi
+    dec rcx
+    jmp .copy_id
+
+.end_quote:
+    inc rsi
+    dec rcx
+.end_one:
+    mov byte [rdi+rbx], 0
+    inc r12d
+    jmp .scan
+
+.advance:
+    inc rsi
+    dec rcx
+    jmp .scan
+
+.done:
+    test r12d, r12d
+    jnz .ret
+    lea rdi, [r14 + OFF_MODEL_SLOTS]
+    lea rsi, [rel fallback_model]
+    call copy_z
+    mov r12d, 1
+.ret:
+    ret
+
+; ---------------- syscall + string helpers ----------------
+
+read_line:
+    ; rdi=buffer, rdx=max size (including NUL)
+    mov r8, rdi
+    dec rdx
+    xor eax, eax
+    xor edi, edi
+    mov rsi, r8
+    syscall
+    test eax, eax
+    jle .done
+
+    mov ecx, eax
+    xor ebx, ebx
+.scan:
+    cmp ebx, ecx
+    jae .term
+    mov al, [r8+rbx]
+    cmp al, 10
+    je .kill
+    cmp al, 13
+    je .kill
+    inc ebx
+    jmp .scan
+.kill:
+    mov byte [r8+rbx], 0
+    mov eax, ebx
+    ret
+.term:
+    mov byte [r8+rcx], 0
+    mov eax, ecx
+    ret
+.done:
+    mov byte [r8], 0
+    ret
+
+read_file:
+    ; rdi=path, rsi=buffer, rdx=max
+    mov r8, rdi
+    mov r9, rsi
+    mov r11, rdx
+
+    mov eax, 257
+    mov edi, -100
+    mov rsi, r8
+    xor edx, edx
+    xor r10d, r10d
+    syscall
+    test eax, eax
+    js .rf_fail
+    mov ebx, eax
+
+    mov rdx, r11
+    dec rdx
+    xor eax, eax
+    mov edi, ebx
+    mov rsi, r9
+    syscall
+    test eax, eax
+    js .rf_close_fail
+
+    mov r12, rax
+    mov byte [r9+r12], 0
+
+    mov eax, 3
+    mov edi, ebx
+    syscall
+
+    mov rax, r12
+    ret
+
+.rf_close_fail:
+    mov eax, 3
+    mov edi, ebx
+    syscall
+.rf_fail:
+    mov rax, -1
+    ret
+
+write_file:
+    ; rdi=path, rsi=buffer, rdx=len
+    mov r8, rdi
+    mov r9, rsi
+    mov r11, rdx
+
+    mov eax, 257
+    mov edi, -100
+    mov rsi, r8
+    mov edx, 0x241
+    mov r10d, 0x1a4
+    syscall
+    test eax, eax
+    js .wf_fail
+    mov ebx, eax
+
+    mov eax, 1
+    mov edi, ebx
+    mov rsi, r9
+    mov rdx, r11
+    syscall
+
+    mov r12, rax
+
+    mov eax, 3
+    mov edi, ebx
+    syscall
+
+    mov rax, r12
+    ret
+
+.wf_fail:
+    mov rax, -1
+    ret
+
+run_shell:
+    ; rdi = command
+    mov eax, 57
+    syscall
+    test eax, eax
+    js .fail
+    jz .child
+
+    mov edi, eax
+    lea rsi, [r14 + OFF_TMP + 16]
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 61
+    syscall
+
+    xor eax, eax
+    ret
+
+.child:
+    mov r8, rdi
+    sub rsp, 32
+    lea rax, [rel sh_arg0]
+    mov [rsp], rax
+    lea rax, [rel sh_arg1]
+    mov [rsp+8], rax
+    mov [rsp+16], r8
+    mov qword [rsp+24], 0
+
+    mov eax, 59
+    lea rdi, [rel sh_path]
+    mov rsi, rsp
+    xor edx, edx
+    syscall
+
+    mov eax, 60
+    mov edi, 127
+    syscall
+
+.fail:
+    mov rax, -1
+    ret
+
+copy_z:
+.cz:
+    lodsb
+    stosb
+    test al, al
+    jnz .cz
+    ret
+
+append_z:
+.az:
+    lodsb
+    stosb
+    test al, al
+    jnz .az
+    dec rdi
+    ret
+
+strlen_z:
+    xor eax, eax
+.sl:
+    cmp byte [rsi+rax], 0
+    je .done
+    inc rax
+    jmp .sl
+.done:
+    ret
+
+write_stdout_z:
+    push rsi
+    call strlen_z
+    mov edx, eax
+    pop rsi
+    mov eax, 1
+    mov edi, 1
+    syscall
+    ret
+
+; ---------------- data ----------------
+
+ansi_clear: db 27, '[2J', 27, '[H', 0
+ansi_reset: db 27, '[0m', 10, 0
+
+stars_1: db 27,'[38;5;24m',27,'[2;2H.   *      .      +     .     *',27,'[3;10H*   .    +     .   *',27,'[4;4H.   *   .      +      .',27,'[0m',0
+stars_2: db 27,'[38;5;25m',27,'[2;6H*   .      .    +      *',27,'[3;3H.     *    .      +    .   *',27,'[4;12H+   .      *      .',27,'[0m',0
+stars_3: db 27,'[38;5;31m',27,'[2;4H.  +    .      *      .   +',27,'[3;12H*    .    +     .   *',27,'[4;1H.     *      .    +      .',27,'[0m',0
+
+hdr_title: db 27,'[1;36m',27,'[1;2H', 'SYNTRA DRIFT FORCE -- QUANTUM PORTAL',27,'[0m',0
+
+frame_wide: db 27,'[36m',27,'[6;1H+----------------------+-----------------------------------------------+----------------------------------+',27,'[7;1H| Conversations        | Main Chat                                     | Canvas / Artifact                |',27,'[8;1H+----------------------+-----------------------------------------------+----------------------------------+',27,'[23;1H+----------------------+-----------------------------------------------+----------------------------------+',27,'[0m',0
+
+frame_compact: db 27,'[36m',27,'[6;1H+--------------------------------------------------------------+',27,'[7;1H| Quantum Portal (compact mode)                               |',27,'[8;1H+--------------------------------------------------------------+',27,'[0m',0
+
+sidebar_conv: db 27,'[38;5;45m',27,'[9;3HRaw ELF Forge',27,'[10;3HGrokdoc v6',27,'[11;3HQuantum Whisper Portal',27,'[12;3HNebula Artifact Lab',27,'[13;3HSignal Drift Chat',27,'[0m',0
+sidebar_conv_compact: db 27,'[38;5;45m',27,'[9;2HConversations: Raw ELF Forge | Grokdoc v6 | Quantum Whisper',27,'[0m',0
+
+model_hdr: db 27,'[38;5;39m',27,'[15;3HModels from xAI API:',10,0
+prompt_model: db 27,'[38;5;214mSelect model [1-8]: ',27,'[0m',0
+selected_prefix: db 27,'[38;5;51mSelected model: ',27,'[0m',0
+prompt_chat: db 27,'[38;5;117mPick convo 1-4 or type prompt: ',27,'[0m',0
+
+pos_selected: db 27,'[14;3H',0
+pos_chat_user: db 27,'[9;25H',0
+pos_chat_ai: db 27,'[11;25H',0
+pos_canvas: db 27,'[9;74H',0
+
+chat_user_hdr: db 27,'[1;36mYou: ',27,'[0m',0
+chat_ai_hdr: db 27,'[1;34mAssistant: ',27,'[0m',0
+
+canvas_hdr: db 27,'[1;36m# Canvas / Artifact',10,27,'[0m',0
+md_prompt: db '## Prompt',10,0
+md_resp: db 10,'## Response',10,0
+
+conv_prompt_1: db 'Summarize the Raw ELF Forge roadmap in 5 bullets.',0
+conv_prompt_2: db 'Draft grokdoc v6 release notes with syscall-level highlights.',0
+conv_prompt_3: db 'Design a holographic Quantum Whisper Portal UX plan.',0
+conv_prompt_4: db 'Generate a markdown artifact with tasks, risks, and next steps.',0
+
+msg_chat_failed: db '(chat request failed: check ~/.xai-key, network, or curl)',0
+msg_no_content: db '(no parsed content found; inspect /tmp/qp_resp.json)',0
+
+req_a: db '{"model":"',0
+req_b: db '","messages":[{"role":"user","content":"',0
+req_c: db '"}]}',0
+
+fallback_model: db 'grok-4-1-fast',0
+
+path_models_json: db '/tmp/qp_models.json',0
+path_req_json: db '/tmp/qp_req.json',0
+path_resp_json: db '/tmp/qp_resp.json',0
+path_model_tmp: db '/tmp/qp_model.tmp',0
+
+sh_path: db '/bin/sh',0
+sh_arg0: db 'sh',0
+sh_arg1: db '-c',0
+
+cmd_fetch_models: db 'key=$(tr -d "\r\n" < "$HOME/.xai-key" 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://api.x.ai/v1/models -H "Authorization: Bearer $key" > /tmp/qp_models.json',0
+cmd_save_model: db 'cat /tmp/qp_model.tmp > "/home/infektyd/.grok-model"',0
+cmd_check_key: db 'key=$(tr -d \"\\r\\n\" < \"$HOME/.xai-key\" 2>/dev/null); curl -sS -w %{http_code} https://api.x.ai/v1/models -H \"Authorization: Bearer $key\" | grep -q 200 || echo \"Key/net fail: $?\ "',0
+cmd_chat: db 'key=$(tr -d "\r\n" < "$HOME/.xai-key" 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://api.x.ai/v1/chat/completions -H "Authorization: Bearer $key" -H "Content-Type: application/json" --data-binary @/tmp/qp_req.json > /tmp/qp_resp.json',0
+
+nl: db 10,0
+
+filesize equ $ - ehdr

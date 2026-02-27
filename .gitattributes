@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+# Keep assembly/hex sources as text with LF
+*.asm text eol=lf
+*.hex text eol=lf
+*.md text eol=lf
+
+# Treat raw binaries as binary blobs
+projects/quantum_portal/quantum_portal binary
+grokdoc binary
+tools/grokdoc binary
+*.bin binary

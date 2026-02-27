@@ -1,0 +1,46 @@
+# Python / virtualenv
+.venv/
+__pycache__/
+*.pyc
+
+# Local tooling state
+.grok/
+.grok-model
+
+# Build artifacts and generated binaries
+build/
+snapshots/
+projects/quantum_portal/quantum_portal
+projects/quantum_portal/quantum_portal.hex
+projects/quantum_portal/quantum_portal.bits.txt
+projects/quantum_portal/snapshots/
+grokdoc
+grokdoc.hex
+tools/grokdoc/grokdoc
+tools/grokdoc/grokdoc.hex
+tools/grokdoc/grokdoc.bits.txt
+
+# Generated markdown outputs
+grok-*.md
+output/grok-*.md
+
+# Logs / temp / crash files
+*.log
+*.tmp
+core
+*.core
+
+# OS / editor noise
+.DS_Store
+*.swp
+*~
+
+# Sensitive keys and build artifacts
+.xai-key
+dummy_xai.key
+*.key
+*.o
+*.s
+test_minimal
+test_minimal*
+quantum_portal_merged.asm
