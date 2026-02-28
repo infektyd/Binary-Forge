@@ -74,10 +74,20 @@ _start:
     lea rsi, [rel fallback_model]
     call copy_z
 
+.main_loop:
     call choose_or_prompt
     test eax, eax
     jle .exit_ok
 
+    ; Check for 'q' to quit
+    cmp eax, 1
+    jne .process_input
+    xor eax, eax
+    mov al, [r14 + OFF_INPUT]
+    cmp al, 'q'
+    je .exit_ok
+
+.process_input:
     call build_request_json
     mov r12, rax
 
@@ -110,6 +120,7 @@ _start:
 
 .render:
     call render_response
+    jmp .main_loop
 
 .exit_ok:
     xor edi, edi
@@ -266,14 +277,15 @@ choose_or_prompt:
     cmp eax, 1
     jne .ret
 
-    mov al, [r14 + OFF_INPUT]
-    cmp al, '1'
+    xor ebx, ebx
+    mov bl, [r14 + OFF_INPUT]
+    cmp bl, '1'
     je .c1
-    cmp al, '2'
+    cmp bl, '2'
     je .c2
-    cmp al, '3'
+    cmp bl, '3'
     je .c3
-    cmp al, '4'
+    cmp bl, '4'
     je .c4
     jmp .ret
 
