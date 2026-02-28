@@ -68,8 +68,11 @@ _start:
     mov r12d, 1
 
 .models_ready:
-    call show_models
-    call choose_model
+    ; call show_models
+    ; call choose_model
+    lea rdi, [r14 + OFF_SEL_MODEL]
+    lea rsi, [rel fallback_model]
+    call copy_z
 
     call choose_or_prompt
     test eax, eax
@@ -775,9 +778,9 @@ msg_no_content: db '(no parsed content found; inspect /tmp/qp_resp.json)',0
 
 req_a: db '{"model":"',0
 req_b: db '","messages":[{"role":"user","content":"',0
-req_c: db '"}]}',0
+req_c: db '"}],"max_tokens":4096}',0
 
-fallback_model: db 'grok-4-1-fast-1-fast',0
+fallback_model: db 'minimax/minimax-m2.5',0
 
 path_models_json: db '/tmp/qp_models.json',0
 path_req_json: db '/tmp/qp_req.json',0
@@ -788,10 +791,10 @@ sh_path: db '/bin/sh',0
 sh_arg0: db 'sh',0
 sh_arg1: db '-c',0
 
-cmd_fetch_models: db 'key=$(tr -d "\r\n" < "$HOME/.xai-key" 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://api.x.ai/v1/models -H "Authorization: Bearer $key" > /tmp/qp_models.json',0
+cmd_fetch_models: db 'key=$(tr -d "\r\n" < /home/infektyd/.openrouter-key 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://openrouter.ai/api/v1/models -H "Authorization: Bearer $key" > /tmp/qp_models.json',0
 cmd_save_model: db 'cat /tmp/qp_model.tmp > "/home/infektyd/.grok-model"',0
 cmd_check_key: db 'key=$(tr -d \"\\r\\n\" < \"$HOME/.xai-key\" 2>/dev/null); curl -sS -w %{http_code} https://api.x.ai/v1/models -H \"Authorization: Bearer $key\" | grep -q 200 || echo \"Key/net fail: $?\ "',0
-cmd_chat: db 'key=$(tr -d "\r\n" < "$HOME/.xai-key" 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://api.x.ai/v1/chat/completions -H "Authorization: Bearer $key" -H "Content-Type: application/json" --data-binary @/tmp/qp_req.json > /tmp/qp_resp.json',0
+cmd_chat: db 'key=$(tr -d "\r\n" < /home/infektyd/.openrouter-key 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $key" -H "Content-Type: application/json" -d @/tmp/qp_req.json > /tmp/qp_resp.json',0
 
 nl: db 10,0
 
