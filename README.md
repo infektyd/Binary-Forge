@@ -1,4 +1,4 @@
-# 🔨 Binary Forge
+# 🔨 Binary-Forge
 
 > *Hand-forged x86-64 Linux binaries. No compiler. No libc. Just raw ELF, direct syscalls, and machine code elegance.*
 
