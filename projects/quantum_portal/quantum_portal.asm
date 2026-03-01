@@ -36,13 +36,35 @@ phdr:
 %define OFF_MODEL_SLOTS 0x7e00
 %define OFF_SEL_MODEL   0x8100
 %define OFF_RESP_TEXT   0x8200
+%define OFF_TERMIOS     0x080
 %define STACK_SIZE      0x9800
+
+%define TCGETS 0x5401
+%define TCSETS 0x5402
+%define IGNBRK 0x0001
+%define BRKINT 0x0002
+%define PARMRK 0x0008
+%define ISTRIP 0x0020
+%define INLCR  0x0040
+%define IGNCR  0x0080
+%define ICRNL  0x0100
+%define IXON   0x0400
+%define OPOST  0x0001
+%define ECHO   0x0008
+%define ECHONL 0x0040
+%define ICANON 0x0002
+%define ISIG   0x0001
+%define IEXTEN 0x8000
+%define PARENB 0x0100
+%define CSIZE  0x0030
+%define CS8    0x0030
 
 _start:
     sub rsp, STACK_SIZE
     mov r14, rsp
 
     call get_winsize
+    call set_raw_mode
     call render_layout
 
     lea rdi, [rel cmd_fetch_models]
@@ -68,11 +90,8 @@ _start:
     mov r12d, 1
 
 .models_ready:
-    ; call show_models
-    ; call choose_model
-    lea rdi, [r14 + OFF_SEL_MODEL]
-    lea rsi, [rel fallback_model]
-    call copy_z
+    call show_models
+    call choose_model
 
 .main_loop:
     call choose_or_prompt
@@ -123,6 +142,7 @@ _start:
     jmp .main_loop
 
 .exit_ok:
+    call restore_termios
     xor edi, edi
     mov eax, 60
     syscall
@@ -745,6 +765,37 @@ write_stdout_z:
     syscall
     ret
 
+set_raw_mode:
+    lea rsi, [r14 + OFF_TERMIOS]
+    mov eax, 16
+    mov edi, 0
+    mov r10d, TCGETS
+    syscall
+    test eax, eax
+    js .srm_ret
+    and dword [r14 + OFF_TERMIOS + 0], ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON)
+    and dword [r14 + OFF_TERMIOS + 4], ~OPOST
+    and dword [r14 + OFF_TERMIOS + 12], ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN)
+    and dword [r14 + OFF_TERMIOS + 8], ~(CSIZE | PARENB)
+    or dword [r14 + OFF_TERMIOS + 8], CS8
+    mov byte [r14 + OFF_TERMIOS + 23], 1
+    mov byte [r14 + OFF_TERMIOS + 22], 0
+    lea rsi, [r14 + OFF_TERMIOS]
+    mov eax, 16
+    mov edi, 0
+    mov r10d, TCSETS
+    syscall
+.srm_ret:
+    ret
+
+restore_termios:
+    lea rsi, [r14 + OFF_TERMIOS]
+    mov eax, 16
+    mov edi, 0
+    mov r10d, TCSETS
+    syscall
+    ret
+
 ; ---------------- data ----------------
 
 ansi_clear: db 27, '[2J', 27, '[H', 0
@@ -803,11 +854,12 @@ sh_path: db '/bin/sh',0
 sh_arg0: db 'sh',0
 sh_arg1: db '-c',0
 
-cmd_fetch_models: db 'key=$(tr -d "\r\n" < /home/infektyd/.openrouter-key 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://openrouter.ai/api/v1/models -H "Authorization: Bearer $key" > /tmp/qp_models.json',0
+cmd_fetch_models: db 'key=$(tr -d "\r\n" < /home/infektyd/.xai-key 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://api.x.ai/v1/models -H "Authorization: Bearer $key" > /tmp/qp_models.json',0
 cmd_save_model: db 'cat /tmp/qp_model.tmp > "/home/infektyd/.grok-model"',0
 cmd_check_key: db 'key=$(tr -d \"\\r\\n\" < \"$HOME/.xai-key\" 2>/dev/null); curl -sS -w %{http_code} https://api.x.ai/v1/models -H \"Authorization: Bearer $key\" | grep -q 200 || echo \"Key/net fail: $?\ "',0
-cmd_chat: db 'key=$(tr -d "\r\n" < /home/infektyd/.openrouter-key 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $key" -H "Content-Type: application/json" -d @/tmp/qp_req.json > /tmp/qp_resp.json',0
+cmd_chat: db 'key=$(tr -d "\r\n" < /home/infektyd/.xai-key 2>/dev/null); [ -n "$key" ] || exit 10; curl -sS https://api.x.ai/v1/chat/completions -H "Authorization: Bearer $key" -H "Content-Type: application/json" -d @/tmp/qp_req.json > /tmp/qp_resp.json',0
 
 nl: db 10,0
+backspace_seq: db 8, ' ', 8, 0
 
 filesize equ $ - ehdr
