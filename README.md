@@ -74,7 +74,7 @@ import os; os.chmod('tools/grokdoc', 0o755)
 ## Project Structure
 
 ```
-grok-binary-collab/
+Binary-Forge/
 ├── tools/grokdoc/                  # Shipped tools (canonical sources + artifacts)
 │   ├── grokdoc.asm                 # NASM source
 │   └── grokdoc.hex                 # Hex dump for portable recreation
@@ -126,8 +126,8 @@ The result is programs that boot in microseconds, have zero dependencies, and fi
 
 ```bash
 # Clone the repo
-git clone https://github.com/<your-username>/grok-binary-collab.git
-cd grok-binary-collab
+git clone https://github.com/<your-username>/Binary-Forge.git
+cd Binary-Forge
 
 # Build grokdoc from source
 nasm -f bin tools/grokdoc/grokdoc.asm -o tools/grokdoc/grokdoc
