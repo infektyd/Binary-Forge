@@ -126,8 +126,8 @@ The result is programs that boot in microseconds, have zero dependencies, and fi
 
 ```bash
 # Clone the repo
-git clone https://github.com/<your-username>/grok-binary-collab.git
-cd grok-binary-collab
+git clone https://github.com/infektyd/binary-forge.git
+cd binary forge
 
 # Build grokdoc from source
 nasm -f bin tools/grokdoc/grokdoc.asm -o tools/grokdoc/grokdoc
