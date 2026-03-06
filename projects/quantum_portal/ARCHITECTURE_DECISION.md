@@ -24,7 +24,7 @@ We are officially decoupling the application into two distinct processes communi
 If the AI API takes 8 seconds to stream a response, a monolithic NASM binary doing synchronous blocking network I/O will freeze the terminal. By separating the network logic into a Python daemon, the NASM binary remains blistering fast. The user can switch tabs, type ahead, and scroll while the Python backend waits on the internet.
 
 ### 2. Absolute Prompt Control (Preserving Vertex Fine-Tuning)
-Monolith orchestrators (like OpenClaw or IDEs like Cursor) inject massive, hidden system preambles (2,000+ tokens) defining the AI's identity. If we use our $1,000 GCP Warchest to fine-tune a bespoke "Syntra" model in Vertex AI, these preambles will override the model's baked-in weights (Identity Clash). 
+Monolith orchestrators (like OpenClaw or IDEs like Cursor) inject massive, hidden system preambles (2,000+ tokens) defining the AI's identity, these preambles can override the model's baked-in weights (Identity Clash). 
 A custom Python backend allows us to strip the context window to the bare metal: bypassing predefined preambles and sending *only* the user's input, environment state, and tool schemas.
 
 ### 3. "Bring Your Own Brain" (BYOB) Extensibility
