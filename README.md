@@ -14,13 +14,13 @@ It's a collaboration between a human and AI agents — brainstorming, iterating,
 
 ## The Binaries
 
-### `quantum_portal` — Terminal Chat Client for xAI API
-**6530 bytes.** A heavy-duty terminal UI chat client featuring a custom scrolling engine, live model switching, and terminal resize awareness — all in raw assembly with zero dependencies beyond `curl`.
+### `quantum_portal` — The "Glass & Brain" IPC Terminal Client
+**3.1 KB.** A hyper-optimized, decoupled Terminal User Interface (TUI) for interacting with AI models. We ripped out the heavy `curl` abstractions and implemented a classic UNIX Pipe (FIFO) architecture.
 
-- **Scrolling Engine:** Fixed header and footer with a central scrolling chat region.
-- **TUI Overhaul:** Unicode box-drawing character borders (`┌─┐`, `│`, `└─┘`) for a premium terminal aesthetic.
-- **Adaptive Layout:** Handles `SIGWINCH` signals for live terminal resizing.
-- **Feature Rich:** Fetches available models from `api.x.ai`, persists selections, supports canned prompts, and allows live model switching via the `/model` (m) command.
+- **The Glass (NASM):** A 3.1KB bare-metal UI that handles screen rendering and non-blocking `sys_poll` I/O.
+- **The Brain (Python):** A swappable background daemon that handles TLS 1.3, JSON serialization, and API routing.
+- **Why?** It completely eliminates "Prompt Override" caused by bloated orchestrators, allowing you to converse with heavily fine-tuned models (like Vertex AI) without injecting invisible preambles.
+
 - **Diagnostic System:** Real-time logging to `/tmp/qp_diag.log` and error reporting via `grokdoc`.
 
 **Requires:** `~/.xai-key` containing your xAI API key.
