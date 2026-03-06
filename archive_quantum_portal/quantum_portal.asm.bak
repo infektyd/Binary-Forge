@@ -27,24 +27,9 @@ phdr:
     dq filesize
     dq 0x1000
 
-%define SYS_read      0
-%define SYS_write     1
-%define SYS_open      2
-%define SYS_poll      7
-
-%define O_RDONLY      0x0000
-%define O_WRONLY      0x0001
-%define O_RDWR        0x0002
-%define O_NONBLOCK    0x0800
-
-%define POLLIN        0x0001
-
 %define OFF_WINSZ       0x000
 %define OFF_TMP         0x040
 %define OFF_INPUT       0x100
-%define OFF_FD_TX     0x5E0
-%define OFF_FD_RX     0x5E8
-
 %define OFF_MODEL_JSON  0x600
 %define OFF_RESP_JSON   0x2600
 %define OFF_REQ_JSON    0x6600
@@ -78,14 +63,35 @@ _start:
     sub rsp, STACK_SIZE
     mov r14, rsp
 
-
-
     call get_winsize
     call set_raw_mode
     call render_layout
 
-    ; The python backend handles the model routing now. 
-    ; Skip the legacy curl model fetch.
+    lea rdi, [rel cmd_fetch_models]
+    call run_shell
+
+    lea rdi, [rel path_models_json]
+    lea rsi, [r14 + OFF_MODEL_JSON]
+    mov edx, 0x1f00
+    call read_file
+    mov r13, rax
+
+    test r13, r13
+    jle .models_fallback
+    lea rsi, [r14 + OFF_MODEL_JSON]
+    mov rcx, r13
+    call parse_models
+    jmp .models_ready
+
+.models_fallback:
+    lea rdi, [r14 + OFF_MODEL_SLOTS]
+    lea rsi, [rel fallback_model]
+    call copy_z
+    mov r12d, 1
+
+.models_ready:
+    call show_models
+    call choose_model
 
 .main_loop:
     call choose_or_prompt
@@ -101,98 +107,35 @@ _start:
     je .exit_ok
 
 .process_input:
-    ; Create/Open TX Pipe dynamically (blocking until python is listening)
-    mov eax, SYS_open
-    lea rdi, [rel str_pipe_tx]
-    mov esi, O_WRONLY
-    xor edx, edx
-    syscall
-    mov [r14 + OFF_FD_TX], eax
+    call build_request_json
+    mov r12, rax
 
-    ; Send user prompt directly to TX pipe
-    lea rdi, [r14 + OFF_INPUT]
-    call string_len
-    mov rdx, rax
-    
-    ; Write to /tmp/qp_tx
-    mov eax, SYS_write
-    mov edi, [r14 + OFF_FD_TX]
-    lea rsi, [r14 + OFF_INPUT]
-    syscall
-    
-    ; Close TX so Python knows we are done sending
-    mov eax, 3  ; SYS_close
-    mov edi, [r14 + OFF_FD_TX]
-    syscall
+    lea rdi, [rel path_req_json]
+    lea rsi, [r14 + OFF_REQ_JSON]
+    mov rdx, r12
+    call write_file
 
-    ; Open RX dynamically to wait for python
-    mov eax, SYS_open
-    lea rdi, [rel str_pipe_rx]
-    mov esi, O_RDONLY | O_NONBLOCK
-    xor edx, edx
-    syscall
-    mov [r14 + OFF_FD_RX], eax
+    lea rdi, [rel cmd_chat]
+    call run_shell
 
-    ; Now we drop into a non-blocking UI wait loop
-.wait_reply:
-    ; Non-blocking check of fd_rx via sys_poll
-    ; Set up array of 1 pollfd (8 bytes)
-    mov eax, [r14 + OFF_FD_RX]
-    mov dword [r14 + OFF_TMP], eax  ; fd
-    mov word  [r14 + OFF_TMP + 4], POLLIN ; events
-    mov word  [r14 + OFF_TMP + 6], 0 ; revents
-    
-    mov eax, SYS_poll
-    lea rdi, [r14 + OFF_TMP]
-    mov esi, 1
-    mov edx, 50     ; Wait max 50ms per check loop 
-    syscall
-
-    test eax, eax
-    jle .wait_reply ; Keep looping until python answers
-    
-    ; Check both POLLIN (0x1) and POLLHUP (0x10) because Python closes the pipe after writing!
-    ; Opus specifically warned us about POLLHUP. Python file objects close after 'with open()' block ends.
-    mov cx, [r14 + OFF_TMP + 6]
-    test cx, 0x0011  ; POLLIN | POLLHUP
-    jz .wait_reply
-
-    ; Result is ready to read! DO NOT CLOSE THE PIPE YET.
-    ; If we close it before reading, we destroy the data waiting on THIS specific file descriptor.
-    
-    mov eax, SYS_read
-    mov edi, [r14 + OFF_FD_RX]
-    lea rsi, [r14 + OFF_RESP_TEXT]
+    lea rdi, [rel path_resp_json]
+    lea rsi, [r14 + OFF_RESP_JSON]
     mov edx, 0x3a00
-    syscall
+    call read_file
+    test rax, rax
+    jg .have_resp
 
-    ; Check if read failed (eax <= 0)
-    cmp eax, 0
-    jle .wait_reply   ; If we hit an error or EOF before reading, just go back to polling
+    lea rdi, [r14 + OFF_RESP_TEXT]
+    lea rsi, [rel msg_chat_failed]
+    call copy_z
+    jmp .render
 
-    ; We successfully read bytes!
-    ; Null terminate response using the length in rax
-    mov byte [r14 + OFF_RESP_TEXT + rax], 0
-    
-    ; NOW we can safely close the used read-pipe instance, since python hung up.
-    push rax          ; save length just in case
-    mov eax, 3        ; SYS_close
-    mov edi, [r14 + OFF_FD_RX]
-    syscall
-    pop rax
-    
-    ; Re-open a fresh RX pipe in NONBLOCK mode for the next conversational turn
-    mov eax, 2        ; SYS_open
-    lea rdi, [rel str_pipe_rx]
-    mov esi, 0x0800   ; O_RDONLY | O_NONBLOCK
-    xor edx, edx
-    syscall
-    mov [r14 + OFF_FD_RX], eax
-
-    ; Render the text to the screen!
-    call render_response
-    jmp .main_loop
-
+.have_resp:
+    mov r13, rax
+    lea rsi, [r14 + OFF_RESP_JSON]
+    mov rcx, r13
+    lea rdi, [r14 + OFF_RESP_TEXT]
+    call extract_content
 
 .render:
     call render_response
@@ -294,6 +237,53 @@ show_models:
 .done:
     ret
 
+choose_model:
+    lea rsi, [rel prompt_model]
+    call write_stdout_z
+
+    lea rdi, [r14 + OFF_TMP + 8]
+    mov edx, 16
+    call read_line
+
+    xor ebx, ebx
+    mov al, [r14 + OFF_TMP + 8]
+    cmp al, '1'
+    jb .sel_ok
+    cmp al, '8'
+    ja .sel_ok
+    sub al, '1'
+    mov bl, al
+
+.sel_ok:
+    cmp ebx, r12d
+    jb .copy
+    xor ebx, ebx
+
+.copy:
+    mov eax, ebx
+    imul eax, 64
+    lea rsi, [r14 + OFF_MODEL_SLOTS]
+    add rsi, rax
+    lea rdi, [r14 + OFF_SEL_MODEL]
+    call copy_z
+
+    lea rsi, [rel selected_prefix]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_SEL_MODEL]
+    call write_stdout_z
+    lea rsi, [rel nl]
+    call write_stdout_z
+
+    lea rdi, [rel path_model_tmp]
+    lea rsi, [r14 + OFF_SEL_MODEL]
+    call strlen_z
+    mov rdx, rax
+    call write_file
+
+    lea rdi, [rel cmd_save_model]
+    call run_shell
+    ret
+
 choose_or_prompt:
     lea rsi, [rel prompt_chat]
     call write_stdout_z
@@ -369,13 +359,219 @@ render_response:
     lea rsi, [r14 + OFF_RESP_TEXT]
     call write_stdout_z
 
-; Canvas render removed to prevent side-by-side text bleeding
+    lea rsi, [rel pos_canvas]
+    call write_stdout_z
+    lea rsi, [rel canvas_hdr]
+    call write_stdout_z
+    lea rsi, [rel md_prompt]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_INPUT]
+    call write_stdout_z
+    lea rsi, [rel md_resp]
+    call write_stdout_z
+    lea rsi, [r14 + OFF_RESP_TEXT]
+    call write_stdout_z
 
     lea rsi, [rel ansi_reset]
     call write_stdout_z
     ret
 
 ; ---------------- request + response ----------------
+
+build_request_json:
+    lea rdi, [r14 + OFF_REQ_JSON]
+
+    lea rsi, [rel req_a]
+    call append_z
+
+    lea rsi, [r14 + OFF_SEL_MODEL]
+    call append_z
+
+    lea rsi, [rel req_b]
+    call append_z
+
+    lea rsi, [r14 + OFF_INPUT]
+.msg_loop:
+    mov al, [rsi]
+    test al, al
+    jz .msg_done
+    cmp al, 34
+    je .space
+    cmp al, 92
+    je .space
+    cmp al, 10
+    je .space
+    cmp al, 13
+    je .space
+    cmp al, 32
+    jb .space
+    jmp .store
+.space:
+    mov al, 32
+.store:
+    mov [rdi], al
+    inc rdi
+    inc rsi
+    jmp .msg_loop
+.msg_done:
+    mov byte [rdi], 0
+
+    lea rsi, [rel req_c]
+    call append_z
+
+    lea rsi, [r14 + OFF_REQ_JSON]
+    call strlen_z
+    ret
+
+extract_content:
+    ; in: rsi=json, rcx=len, rdi=out
+.find:
+    cmp rcx, 11
+    jb .fallback
+
+    cmp byte [rsi], '"'
+    jne .next
+    cmp byte [rsi+1], 'c'
+    jne .next
+    cmp byte [rsi+2], 'o'
+    jne .next
+    cmp byte [rsi+3], 'n'
+    jne .next
+    cmp byte [rsi+4], 't'
+    jne .next
+    cmp byte [rsi+5], 'e'
+    jne .next
+    cmp byte [rsi+6], 'n'
+    jne .next
+    cmp byte [rsi+7], 't'
+    jne .next
+    cmp byte [rsi+8], '"'
+    jne .next
+    cmp byte [rsi+9], ':'
+    jne .next
+    cmp byte [rsi+10], '"'
+    jne .next
+
+    add rsi, 11
+    sub rcx, 11
+    xor r8d, r8d
+.copy:
+    test rcx, rcx
+    jz .done
+    mov al, [rsi]
+    cmp al, '"'
+    je .done
+    cmp al, 92
+    jne .plain
+    cmp rcx, 1
+    jbe .done
+    mov al, [rsi+1]
+    cmp al, 'n'
+    jne .escape_other
+    mov al, 10
+    add rsi, 2
+    sub rcx, 2
+    jmp .put
+.escape_other:
+    add rsi, 2
+    sub rcx, 2
+    jmp .put
+.plain:
+    inc rsi
+    dec rcx
+.put:
+    cmp r8d, 3000
+    jae .done
+    mov [rdi+r8], al
+    inc r8
+    jmp .copy
+.done:
+    mov byte [rdi+r8], 0
+    ret
+
+.next:
+    inc rsi
+    dec rcx
+    jmp .find
+
+.fallback:
+    lea rsi, [rel msg_no_content]
+    call copy_z
+    ret
+
+; ---------------- parse model ids ----------------
+
+parse_models:
+    ; in: rsi=buffer rcx=len, out: r12d=count
+    xor r12d, r12d
+
+.scan:
+    cmp rcx, 6
+    jbe .done
+    cmp r12d, 8
+    jae .done
+
+    cmp byte [rsi], '"'
+    jne .advance
+    cmp byte [rsi+1], 'i'
+    jne .advance
+    cmp byte [rsi+2], 'd'
+    jne .advance
+    cmp byte [rsi+3], '"'
+    jne .advance
+    cmp byte [rsi+4], ':'
+    jne .advance
+    cmp byte [rsi+5], '"'
+    jne .advance
+
+    add rsi, 6
+    sub rcx, 6
+
+    mov eax, r12d
+    imul eax, 64
+    lea rdi, [r14 + OFF_MODEL_SLOTS]
+    add rdi, rax
+    xor ebx, ebx
+
+.copy_id:
+    test rcx, rcx
+    jz .end_one
+    mov al, [rsi]
+    cmp al, '"'
+    je .end_quote
+    cmp ebx, 63
+    jae .skip_store
+    mov [rdi+rbx], al
+    inc ebx
+.skip_store:
+    inc rsi
+    dec rcx
+    jmp .copy_id
+
+.end_quote:
+    inc rsi
+    dec rcx
+.end_one:
+    mov byte [rdi+rbx], 0
+    inc r12d
+    jmp .scan
+
+.advance:
+    inc rsi
+    dec rcx
+    jmp .scan
+
+.done:
+    test r12d, r12d
+    jnz .ret
+    lea rdi, [r14 + OFF_MODEL_SLOTS]
+    lea rsi, [rel fallback_model]
+    call copy_z
+    mov r12d, 1
+.ret:
+    ret
+
+; ---------------- syscall + string helpers ----------------
 
 read_line:
     ; rdi=buffer, rdx=max size (including NUL)
@@ -412,8 +608,127 @@ read_line:
     mov byte [r8], 0
     ret
 
+read_file:
+    ; rdi=path, rsi=buffer, rdx=max
+    mov r8, rdi
+    mov r9, rsi
+    mov r11, rdx
+
+    mov eax, 257
+    mov edi, -100
+    mov rsi, r8
+    xor edx, edx
+    xor r10d, r10d
+    syscall
+    test eax, eax
+    js .rf_fail
+    mov ebx, eax
+
+    mov rdx, r11
+    dec rdx
+    xor eax, eax
+    mov edi, ebx
+    mov rsi, r9
+    syscall
+    test eax, eax
+    js .rf_close_fail
+
+    mov r12, rax
+    mov byte [r9+r12], 0
+
+    mov eax, 3
+    mov edi, ebx
+    syscall
+
+    mov rax, r12
+    ret
+
+.rf_close_fail:
+    mov eax, 3
+    mov edi, ebx
+    syscall
+.rf_fail:
+    mov rax, -1
+    ret
+
+write_file:
+    ; rdi=path, rsi=buffer, rdx=len
+    mov r8, rdi
+    mov r9, rsi
+    mov r11, rdx
+
+    mov eax, 257
+    mov edi, -100
+    mov rsi, r8
+    mov edx, 0x241
+    mov r10d, 0x1a4
+    syscall
+    test eax, eax
+    js .wf_fail
+    mov ebx, eax
+
+    mov eax, 1
+    mov edi, ebx
+    mov rsi, r9
+    mov rdx, r11
+    syscall
+
+    mov r12, rax
+
+    mov eax, 3
+    mov edi, ebx
+    syscall
+
+    mov rax, r12
+    ret
+
+.wf_fail:
+    mov rax, -1
+    ret
+
+run_shell:
+    ; rdi = command
+    mov eax, 57
+    syscall
+    test eax, eax
+    js .fail
+    jz .child
+
+    mov edi, eax
+    lea rsi, [r14 + OFF_TMP + 16]
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 61
+    syscall
+
+    xor eax, eax
+    ret
+
+.child:
+    mov r8, rdi
+    sub rsp, 32
+    lea rax, [rel sh_arg0]
+    mov [rsp], rax
+    lea rax, [rel sh_arg1]
+    mov [rsp+8], rax
+    mov [rsp+16], r8
+    mov qword [rsp+24], 0
+
+    mov eax, 59
+    lea rdi, [rel sh_path]
+    mov rsi, rsp
+    xor edx, edx
+    syscall
+
+    mov eax, 60
+    mov edi, 127
+    syscall
+
+.fail:
+    mov rax, -1
+    ret
+
 copy_z:
-    cld
 .cz:
     lodsb
     stosb
@@ -422,7 +737,6 @@ copy_z:
     ret
 
 append_z:
-    cld
 .az:
     lodsb
     stosb
@@ -505,9 +819,9 @@ prompt_model: db 27,'[38;5;214mSelect model [1-8]: ',27,'[0m',0
 selected_prefix: db 27,'[38;5;51mSelected model: ',27,'[0m',0
 prompt_chat: db 27,'[38;5;117mPick convo 1-4 or type prompt: ',27,'[0m',0
 
-pos_selected: db 27,'[8;2H',0
-pos_chat_user: db 27,'[11;2H',10,10,0
-pos_chat_ai: db 10,10,0
+pos_selected: db 27,'[14;3H',0
+pos_chat_user: db 27,'[9;25H',0
+pos_chat_ai: db 27,'[11;25H',0
 pos_canvas: db 27,'[9;74H',0
 
 chat_user_hdr: db 27,'[1;36mYou: ',27,'[0m',0
@@ -522,28 +836,30 @@ conv_prompt_2: db 'Draft grokdoc v6 release notes with syscall-level highlights.
 conv_prompt_3: db 'Design a holographic Quantum Whisper Portal UX plan.',0
 conv_prompt_4: db 'Generate a markdown artifact with tasks, risks, and next steps.',0
 
+msg_chat_failed: db '(chat request failed: check /home/infektyd/.xai-key, network, or curl)',0
+msg_no_content: db '(no parsed content found; inspect /tmp/qp_resp.json)',0
 
+req_a: db '{"model":"',0
+req_b: db '","messages":[{"role":"user","content":"',0
+req_c: db '"}],"max_tokens":4096}',0
 
 fallback_model: db 'minimax/minimax-m2.5',0
-str_pipe_tx: db "/tmp/qp_tx", 0
-str_pipe_rx: db "/tmp/qp_rx", 0
 
+path_models_json: db '/tmp/qp_models.json',0
+path_req_json: db '/tmp/qp_req.json',0
+path_resp_json: db '/tmp/qp_resp.json',0
+path_model_tmp: db '/tmp/qp_model.tmp',0
 
+sh_path: db '/bin/sh',0
+sh_arg0: db 'sh',0
+sh_arg1: db '-c',0
 
-
+cmd_fetch_models: db '[ -n "$XAI_API_KEY" ] || exit 10; curl -sS https://api.x.ai/v1/models -H "Authorization: Bearer $XAI_API_KEY" > /tmp/qp_models.json',0
+cmd_save_model: db 'cat /tmp/qp_model.tmp > "/home/infektyd/.grok-model"',0
+cmd_check_key: db '[ -n "$XAI_API_KEY" ] || exit 10; curl -sS -w %{http_code} https://api.x.ai/v1/models -H "Authorization: Bearer $XAI_API_KEY" | grep -q 200 || echo "Key/net fail: $? "',0
+cmd_chat: db '[ -n "$XAI_API_KEY" ] || exit 10; curl -sS https://api.x.ai/v1/chat/completions -H "Authorization: Bearer $XAI_API_KEY" -H "Content-Type: application/json" -d @/tmp/qp_req.json > /tmp/qp_resp.json',0
 
 nl: db 10,0
 backspace_seq: db 8, ' ', 8, 0
 
 filesize equ $ - ehdr
-
-
-string_len:
-    xor eax, eax
-.loop:
-    cmp byte [rdi+rax], 0
-    je .done
-    inc eax
-    jmp .loop
-.done:
-    ret
