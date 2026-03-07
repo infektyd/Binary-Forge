@@ -1,4 +1,4 @@
-# 🔨 Grok Binary Forge
+# 🔨 Binary Forge
 
 > *Hand-forged x86-64 Linux binaries. No compiler. No libc. Just raw ELF, direct syscalls, and machine code elegance.*
 
@@ -6,99 +6,153 @@
 
 ## What Is This?
 
-This project builds **raw ELF executables** from scratch — every byte of the ELF header, every opcode, every syscall invocation is written by hand in NASM assembly. No C runtime, no dynamic linker, no standard library. Programs are tiny (often under 500 bytes), self-contained, and talk directly to the Linux kernel.
+This project builds **raw ELF executables** from scratch — every byte of the ELF header, every opcode, every syscall written by hand in NASM assembly. No C runtime. No dynamic linker. No standard library. Programs are tiny, self-contained, and talk directly to the Linux kernel.
 
-It's a collaboration between a human and AI agents — brainstorming, iterating, and forging binaries that do real work with radical minimalism. Think Torvalds-grade efficiency meets sci-fi terminal aesthetics.
+It's a collaboration between a human and AI — brainstorming, iterating, and forging binaries that do real work with radical minimalism. The latest milestone: **an AI autonomously controlling a 3D printer through a 3.3KB NASM binary** for under $1.20 in API costs.
 
 ---
 
-## The Binaries
+## The Stack
 
-### `quantum_portal` — The "Glass & Brain" IPC Terminal Client
-**3.1 KB.** A hyper-optimized, decoupled Terminal User Interface (TUI) for interacting with AI models. We ripped out the heavy `curl` abstractions and implemented a classic UNIX Pipe (FIFO) architecture.
+### `quantum_portal` — "Glass & Brain" AI Terminal (3.3KB)
 
-- **The Glass (NASM):** A 3.1KB bare-metal UI that handles screen rendering and non-blocking `sys_poll` I/O.
-- **The Brain (Python):** A swappable background daemon that handles TLS 1.3, JSON serialization, and API routing.
-- **Why?** It completely eliminates "Prompt Override" caused by bloated orchestrators, allowing you to converse with heavily fine-tuned models (like Vertex AI) without injecting invisible preambles.
+A hyper-optimized TUI for interacting with AI models. The architecture is split:
 
-- **Diagnostic System:** Real-time logging to `/tmp/qp_diag.log` and error reporting via `grokdoc`.
+- **The Glass (NASM):** A 3.3KB bare-metal UI handling screen rendering and non-blocking `sys_poll` I/O. Zero libc. Zero dependencies. Talks to backends via **AF_UNIX abstract socket** (`\0grok_socket`).
+- **The Brain (Python):** A swappable backend handling TLS, JSON, API routing, and conversation history. Plug in any model.
 
-**Requires:** `~/.xai-key` containing your xAI API key.
+**Why abstract sockets over FIFOs?** No filesystem races, no SIGPIPE, no mkfifo setup. The socket is created in kernel memory and disappears with the process.
 
-### `grokdoc` — Markdown Document Generator
-**509 bytes.** Takes a topic, creates a markdown file, prints an ANSI-colored preview.
+**Why this architecture?** It strips all orchestrator preamble from model prompts — critical for fine-tuned and beta models that break when invisible system text is injected ahead of your input.
 
 ```bash
-# From command-line argument
-./tools/grokdoc/grokdoc "Quantum Computing"
-# → creates grok-Quantum Computing.md, prints green preview
+cd projects/quantum_portal
 
-# From stdin
-echo "Linux Kernel" | ./tools/grokdoc/grokdoc
+# Build the glass
+nasm -f bin quantum_portal.asm -o quantum_portal
+chmod +x quantum_portal
+
+# Start a backend (e.g. Grok 4.20 multi-agent)
+export XAI_API_KEY=your_key_here
+python3 backends/xai_beta_v2.py &
+
+# Launch
+./quantum_portal
 ```
-
-**Syscalls:** `read` → `openat` → `write` → `close` → `write` (stdout) → `exit`
 
 ---
 
-## How Binaries Are Built
+### `serial` — NASM Serial Console (11KB)
+
+A bare-metal serial terminal for direct hardware communication. Zero libc. Built with `ld -nostdlib -static`.
+
+Implemented syscalls: `open`, `ioctl` (TCGETS/TCSETS for raw 115200 8N1), `read`, `write`, `poll`.
+
+Validated against a **Creality CR-10S Pro** running Marlin 1.70.1 over `/dev/ttyUSB0`. First contact returned a full M115 firmware capabilities dump.
+
+```bash
+cd projects/quantum_portal
+
+# Build
+nasm -f elf64 serial.asm -o serial.o
+ld -nostdlib -static serial.o -o serial
+
+# Use (requires dialout group membership)
+./serial
+```
+
+---
+
+### `backends/printer_brain.py` — Grok → Serial Bridge
+
+The Python backend that connects **Grok 4.20 multi-agent** to the serial port. It:
+
+- Serves the AF_UNIX abstract socket (`\0grok_socket`) for quantum_portal
+- Forwards prompts to the Grok 4.20 `/v1/responses` API with full conversation history
+- Parses `[GCODE: ...]` blocks from Grok responses and executes them over pyserial
+- Returns Marlin's response back to Grok for the next turn
+
+This is the bridge that makes **autonomous AI printer control** possible.
+
+```bash
+export XAI_API_KEY=your_key_here
+python3 backends/printer_brain.py
+# [Printer] Connected to /dev/ttyUSB0
+# [Brain] Printer Brain online. Listening on \0grok_socket
+```
+
+---
+
+### `backends/xai_beta_v2.py` — Grok 4.20 Backend
+
+Grok 4.20 multi-agent backend with hardware trace logger. Logs latency, reasoning tokens, and raw JSON to `memory/hardware_trace.log` for benchmarking.
+
+Uses `/v1/responses` endpoint (not `/v1/chat/completions` — the multi-agent model requires the responses API). Maintains full string-based conversation history across turns.
+
+---
+
+## Milestone: Autonomous AI Hardware Control
+
+On March 6, 2026, Grok 4.20 multi-agent autonomously:
+
+1. Homed a CR-10S Pro 3D printer (G28)
+2. Detected and disabled bed mesh compensation (M420 S0)
+3. Set PLA temperatures and waited for thermal stabilization (M190/M109)
+4. Generated multi-layer G-code from a natural language description
+5. Self-corrected mid-print when Z drift was detected (re-triggered G28)
+6. Named and printed **"Grok's Embarrassing Singularity Maw"** — a 5-layer organic horror flower with jagged spiraling teeth petals — entirely unprompted
+
+**Total API cost: ~$1.20.** NASM binary stable throughout. No segfaults. No socket deadlocks.
+
+The full session log is in `memory/grok_printer_session.md`.
+
+---
+
+## Build Pattern
 
 Every binary follows the same forge pattern:
 
-1. **Write NASM assembly** with embedded ELF header + program header (flat binary, `org 0x400000`)
-2. **Assemble:** `nasm -f bin <name>.asm -o <name>`
-3. **Make executable:** `chmod +x <name>`
-4. **Test in sandbox:** `firejail --noprofile ./<name>`
-5. **Inspect:** `readelf -h`, `objdump -d`, `strace`, `xxd -p`
-
-The hex dump and binary representation are also stored alongside the source for portability — you can recreate any binary from the hex alone:
-
 ```bash
-# From hex dump
-xxd -r -p tools/grokdoc/grokdoc.hex > tools/grokdoc/grokdoc && chmod +x tools/grokdoc/grokdoc
+# Flat binary (quantum_portal style — ELF header hand-written in ASM)
+nasm -f bin <name>.asm -o <name>
+chmod +x <name>
 
-# Python one-liner
-python3 -c "
-h = open('tools/grokdoc/grokdoc.hex').read().strip()
-open('tools/grokdoc/grokdoc','wb').write(bytes.fromhex(h))
-import os; os.chmod('tools/grokdoc/grokdoc', 0o755)
-"
+# Static ELF (serial style — standard sections, no libc)
+nasm -f elf64 <name>.asm -o <name>.o
+ld -nostdlib -static <name>.o -o <name>
+```
+
+Inspect:
+```bash
+readelf -h <binary>
+objdump -d <binary>
+strace ./<binary>
+wc -c <binary>   # how small is it?
 ```
 
 ---
 
 ## The Forge Philosophy
 
-**Constraints breed creativity.** Every binary in this project follows these rules:
+**Constraints breed creativity.**
 
-- **User-space x86-64 Linux only** — no kernel modules, no other platforms
-- **Pure machine code** — hand-crafted ELF headers, no linker scripts
+- **User-space x86-64 Linux only**
+- **Pure machine code** — hand-crafted ELF headers, no linker scripts (for flat binaries)
 - **Direct syscalls only** — `syscall` instruction, not libc wrappers
-- **Minimal and complete** — every byte earns its place (<450 bytes target for simple tools)
-- **Efficient and elegant** — Torvalds-style: if it can be simpler, it should be
+- **Minimal and complete** — every byte earns its place
+- **Glass & Brain split** — NASM owns the UI, Python owns the network
 
-The result is programs that boot in microseconds, have zero dependencies, and fit in a tweet.
+The result is programs that boot in microseconds, have zero dependencies, and can drive physical hardware through a cloud AI for less than the cost of a coffee.
 
 ---
 
-## Quick Start
+## Requirements
 
-```bash
-# Clone the repo
-git clone https://github.com/infektyd/Binary-Forge.git
-cd Binary-Forge
-
-# Setup your API key
-echo "your_xai_api_key_here" > ~/.xai-key
-
-# Build quantum_portal
-cd projects/quantum_portal
-nasm -f bin quantum_portal.asm -o quantum_portal
-chmod +x quantum_portal
-
-# Run the TUI
-./quantum_portal
-```
+- Linux x86-64
+- NASM (`apt install nasm`)
+- Python 3 + pyserial (`pip3 install pyserial`) for printer_brain
+- xAI API key with Grok 4.20 multi-agent access
+- For serial: user must be in `dialout` group (`sudo usermod -aG dialout $USER`)
 
 ---
 
