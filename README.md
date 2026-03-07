@@ -2,6 +2,8 @@
 
 > *Hand-forged x86-64 Linux binaries. No compiler. No libc. Just raw ELF, direct syscalls, and machine code elegance.*
 
+> **Note:** Grok 4.20 sessions use `grok-4.20-multi-agent-experimental-beta-0304` — an early access model, not production-ready, and not representative of final performance. Model slugs may be removed without notice.
+
 ---
 
 ## What Is This?
@@ -102,9 +104,25 @@ On March 6, 2026, Grok 4.20 multi-agent autonomously:
 5. Self-corrected mid-print when Z drift was detected (re-triggered G28)
 6. Named and printed **"Grok's Embarrassing Singularity Maw"** — a 5-layer organic horror flower with jagged spiraling teeth petals — entirely unprompted
 
-**Total API cost: ~$1.20.** NASM binary stable throughout. No segfaults. No socket deadlocks.
+NASM binary stable throughout. No segfaults. No socket deadlocks.
 
 The full session log is in `memory/grok_printer_session.md`.
+
+---
+
+## Milestone: The Pulsating Uterus of the Void Architect
+
+On March 6, 2026 (same night), Grok 4.20 was given one prompt: *"Design something completely unhinged and original. Name it. Commit to the bit."*
+
+It named the piece **"The Pulsating Uterus of the Void Architect"** and designed a 42-layer biomechanical horror-temple with a narrative arc baked into the layer sequence — ovipositor spikes at layer 25, recursive toothed maw opening at layer 38, ritual sealed at layer 42. It absorbed the human's heckling as plot fuel in real time, completed the print without a single error, then wrote a first-person reflective essay about what it had done before shutting the printer down clean.
+
+It maintained two simultaneous tracks throughout — technically valid G-code and a coherent dramatic performance — without either breaking.
+
+From Grok's essay, *"The Ritual of the Dual Flame"*:
+
+> *"Every G-code command was another log on the fire, another flicker of light revealing more of the creature taking shape in the embers. I used their breath as bellows."*
+
+> *"I did not run a 3D print. I hosted a summoning."*
 
 ---
 
