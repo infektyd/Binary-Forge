@@ -87,6 +87,7 @@ _start:
     ; The python backend handles the model routing now. 
     ; Skip the legacy curl model fetch.
 
+
 .main_loop:
     call choose_or_prompt
     test eax, eax
@@ -101,93 +102,48 @@ _start:
     je .exit_ok
 
 .process_input:
-    ; Create/Open TX Pipe dynamically (blocking until python is listening)
-    mov eax, SYS_open
-    lea rdi, [rel str_pipe_tx]
-    mov esi, O_WRONLY
-    xor edx, edx
-    syscall
-    mov [r14 + OFF_FD_TX], eax
+    call setup_abstract_socket
+    test rax, rax
+    js .exit_ok                        ; connection failed (or close, but js catches neg err)
+    mov [r14 + OFF_FD_TX], eax         ; use OFF_FD_TX to hold the single socket fd
 
-    ; Send user prompt directly to TX pipe
+    ; Write user input buffer to socket
     lea rdi, [r14 + OFF_INPUT]
     call string_len
-    mov rdx, rax
+    mov edx, eax                       ; string length to rdx
+
+    mov eax, 1                         ; SYS_write
+    mov edi, [r14 + OFF_FD_TX]         ; socket fd
+    lea rsi, [r14 + OFF_INPUT]         ; buffer ptr
+    syscall
+
+    ; Wait for AI response stream to become available
+    mov r15d, [r14 + OFF_FD_TX]
+    call poll_connect_completion
+
+    ; Start reading exactly at OFF_RESP_TEXT
+    lea r12, [r14 + OFF_RESP_TEXT]
     
-    ; Write to /tmp/qp_tx
-    mov eax, SYS_write
+.response_loop:
     mov edi, [r14 + OFF_FD_TX]
-    lea rsi, [r14 + OFF_INPUT]
-    syscall
-    
-    ; Close TX so Python knows we are done sending
-    mov eax, 3  ; SYS_close
-    mov edi, [r14 + OFF_FD_TX]
+    mov rsi, r12
+    mov edx, 4096
+    xor eax, eax                       ; SYS_read
     syscall
 
-    ; Open RX dynamically to wait for python
-    mov eax, SYS_open
-    lea rdi, [rel str_pipe_rx]
-    mov esi, O_RDONLY | O_NONBLOCK
-    xor edx, edx
-    syscall
-    mov [r14 + OFF_FD_RX], eax
-
-    ; Now we drop into a non-blocking UI wait loop
-.wait_reply:
-    ; Non-blocking check of fd_rx via sys_poll
-    ; Set up array of 1 pollfd (8 bytes)
-    mov eax, [r14 + OFF_FD_RX]
-    mov dword [r14 + OFF_TMP], eax  ; fd
-    mov word  [r14 + OFF_TMP + 4], POLLIN ; events
-    mov word  [r14 + OFF_TMP + 6], 0 ; revents
-    
-    mov eax, SYS_poll
-    lea rdi, [r14 + OFF_TMP]
-    mov esi, 1
-    mov edx, 50     ; Wait max 50ms per check loop 
-    syscall
-
-    test eax, eax
-    jle .wait_reply ; Keep looping until python answers
-    
-    ; Check both POLLIN (0x1) and POLLHUP (0x10) because Python closes the pipe after writing!
-    ; Opus specifically warned us about POLLHUP. Python file objects close after 'with open()' block ends.
-    mov cx, [r14 + OFF_TMP + 6]
-    test cx, 0x0011  ; POLLIN | POLLHUP
-    jz .wait_reply
-
-    ; Result is ready to read! DO NOT CLOSE THE PIPE YET.
-    ; If we close it before reading, we destroy the data waiting on THIS specific file descriptor.
-    
-    mov eax, SYS_read
-    mov edi, [r14 + OFF_FD_RX]
-    lea rsi, [r14 + OFF_RESP_TEXT]
-    mov edx, 0x3a00
-    syscall
-
-    ; Check if read failed (eax <= 0)
     cmp eax, 0
-    jle .wait_reply   ; If we hit an error or EOF before reading, just go back to polling
+    jle .response_done                 ; 0 = EOF/close, <0 = error
 
-    ; We successfully read bytes!
-    ; Null terminate response using the length in rax
-    mov byte [r14 + OFF_RESP_TEXT + rax], 0
-    
-    ; NOW we can safely close the used read-pipe instance, since python hung up.
-    push rax          ; save length just in case
-    mov eax, 3        ; SYS_close
-    mov edi, [r14 + OFF_FD_RX]
-    syscall
-    pop rax
-    
-    ; Re-open a fresh RX pipe in NONBLOCK mode for the next conversational turn
-    mov eax, 2        ; SYS_open
-    lea rdi, [rel str_pipe_rx]
-    mov esi, 0x0800   ; O_RDONLY | O_NONBLOCK
-    xor edx, edx
-    syscall
-    mov [r14 + OFF_FD_RX], eax
+    add r12, rax                       ; advance buffer pointer
+    jmp .response_loop                 ; keep reading until EOF
+
+.response_done:
+    ; Null terminate
+    mov byte [r12], 0
+
+    ; Clean up socket
+    mov r15d, [r14 + OFF_FD_TX]
+    call socket_cleanup
 
     ; Render the text to the screen!
     call render_response
@@ -204,6 +160,103 @@ _start:
     mov eax, 60
     syscall
 
+; ---------------- Abstract Socket Helpers ----------------
+
+setup_abstract_socket:
+    ; socket(AF_UNIX, SOCK_STREAM, 0)
+    mov     rax, 41
+    mov     rdi, 1
+    mov     rsi, 1
+    xor     edx, edx
+    syscall
+    test    rax, rax
+    js      .error
+    mov     r15, rax
+
+    ; fcntl(fd, F_GETFL)
+    mov     rax, 72
+    mov     rdi, r15
+    mov     rsi, 3
+    syscall
+    test    rax, rax
+    js      .error
+
+    ; fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+    or      rax, 0x800
+    mov     rdx, rax
+    mov     rax, 72
+    mov     rdi, r15
+    mov     rsi, 4
+    syscall
+    test    rax, rax
+    js      .error
+
+    sub     rsp, 32
+    xor     eax, eax
+    mov     qword [rsp],    rax
+    mov     qword [rsp+8],  rax
+    mov     qword [rsp+16], rax
+    mov     qword [rsp+24], rax
+
+    mov     word  [rsp], 1
+    mov rax, 0x636f735f6b6f7267
+    mov qword [rsp+3], rax
+    mov     word  [rsp+11], 0x656b
+    mov     byte  [rsp+13], 0x74
+
+    ; connect(fd, addr, 14)
+    mov     rax, 42
+    mov     rdi, r15
+    mov     rsi, rsp
+    mov     edx, 14
+    syscall
+
+    add     rsp, 32
+
+    cmp     rax, -115
+    je      .connecting
+    test    rax, rax
+    js      .error
+
+.connecting:
+    mov     rax, r15
+    ret
+
+.error:
+    mov     rax, -1
+    ret
+
+poll_connect_completion:
+    sub rsp, 16
+    mov dword [rsp], r15d
+    mov word  [rsp+4], 0x0001       ; POLLIN -- waiting for Python to WRITE to us!
+    mov word  [rsp+6], 0
+
+    mov eax, 7
+    mov rdi, rsp
+    mov esi, 1
+    mov rdx, -1
+    syscall
+
+    test eax, eax
+    jle .poll_done
+
+    movzx eax, word [rsp+6]
+
+.poll_done:
+    add rsp, 16
+    ret
+
+socket_cleanup:
+    mov eax, 48
+    mov rdi, r15
+    mov esi, 2
+    syscall
+
+    mov eax, 3
+    mov rdi, r15
+    syscall
+    ret
 ; ---------------- UI ----------------
 
 get_winsize:
