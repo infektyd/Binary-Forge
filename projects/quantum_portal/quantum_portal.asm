@@ -42,6 +42,7 @@ phdr:
 %define OFF_WINSZ       0x000
 %define OFF_TMP         0x040
 %define OFF_INPUT       0x100
+%define OFF_MOOD        0x5D0
 %define OFF_FD_TX     0x5E0
 %define OFF_FD_RX     0x5E8
 
@@ -78,7 +79,7 @@ _start:
     sub rsp, STACK_SIZE
     mov r14, rsp
 
-
+    call pick_mood
 
     call get_winsize
     call set_raw_mode
@@ -293,7 +294,7 @@ render_layout:
     lea rsi, [rel stars_3]
     call write_stdout_z
 .stars_done:
-
+    call write_mood_color
     lea rsi, [rel hdr_title]
     call write_stdout_z
 
@@ -301,6 +302,7 @@ render_layout:
     cmp eax, 110
     jb .compact
 
+    call write_mood_color
     lea rsi, [rel frame_wide]
     call write_stdout_z
     lea rsi, [rel sidebar_conv]
@@ -308,9 +310,41 @@ render_layout:
     ret
 
 .compact:
+    call write_mood_color
     lea rsi, [rel frame_compact]
     call write_stdout_z
     lea rsi, [rel sidebar_conv_compact]
+    call write_stdout_z
+    ret
+
+pick_mood:
+    rdrand eax
+    jc .ok
+    rdtsc
+.ok:
+    and eax, 3
+    mov [r14 + OFF_MOOD], al
+    ret
+
+write_mood_color:
+    movzx eax, byte [r14 + OFF_MOOD]
+    cmp eax, 1
+    je .grind
+    cmp eax, 2
+    je .chaos
+    cmp eax, 3
+    je .intense
+    lea rsi, [rel mood_chill]
+    jmp .print
+.grind:
+    lea rsi, [rel mood_grind]
+    jmp .print
+.chaos:
+    lea rsi, [rel mood_chaos]
+    jmp .print
+.intense:
+    lea rsi, [rel mood_intense]
+.print:
     call write_stdout_z
     ret
 
@@ -544,11 +578,11 @@ stars_1: db 27,'[38;5;24m',27,'[2;2H.   *      .      +     .     *',27,'[3;10H*
 stars_2: db 27,'[38;5;25m',27,'[2;6H*   .      .    +      *',27,'[3;3H.     *    .      +    .   *',27,'[4;12H+   .      *      .',27,'[0m',0
 stars_3: db 27,'[38;5;31m',27,'[2;4H.  +    .      *      .   +',27,'[3;12H*    .    +     .   *',27,'[4;1H.     *      .    +      .',27,'[0m',0
 
-hdr_title: db 27,'[1;36m',27,'[1;2H', 'SYNTRA DRIFT FORCE -- QUANTUM PORTAL',27,'[0m',0
+hdr_title: db 27,'[1;2H', 'SYNTRA DRIFT FORCE -- QUANTUM PORTAL',0
 
-frame_wide: db 27,'[36m',27,'[6;1H+----------------------+-----------------------------------------------+----------------------------------+',27,'[7;1H| Conversations        | Main Chat                                     | Canvas / Artifact                |',27,'[8;1H+----------------------+-----------------------------------------------+----------------------------------+',27,'[23;1H+----------------------+-----------------------------------------------+----------------------------------+',27,'[0m',0
+frame_wide: db 27,'[6;1H+----------------------+-----------------------------------------------+----------------------------------+',27,'[7;1H| Conversations        | Main Chat                                     | Canvas / Artifact                |',27,'[8;1H+----------------------+-----------------------------------------------+----------------------------------+',27,'[23;1H+----------------------+-----------------------------------------------+----------------------------------+',0
 
-frame_compact: db 27,'[36m',27,'[6;1H+--------------------------------------------------------------+',27,'[7;1H| Quantum Portal (compact mode)                               |',27,'[8;1H+--------------------------------------------------------------+',27,'[0m',0
+frame_compact: db 27,'[6;1H+--------------------------------------------------------------+',27,'[7;1H| Quantum Portal (compact mode)                               |',27,'[8;1H+--------------------------------------------------------------+',0
 
 sidebar_conv: db 27,'[38;5;45m',27,'[9;3HRaw ELF Forge',27,'[10;3HGrokdoc v6',27,'[11;3HQuantum Whisper Portal',27,'[12;3HNebula Artifact Lab',27,'[13;3HSignal Drift Chat',27,'[0m',0
 sidebar_conv_compact: db 27,'[38;5;45m',27,'[9;2HConversations: Raw ELF Forge | Grokdoc v6 | Quantum Whisper',27,'[0m',0
@@ -581,6 +615,10 @@ fallback_model: db 'minimax/minimax-m2.5',0
 str_pipe_tx: db "/tmp/qp_tx", 0
 str_pipe_rx: db "/tmp/qp_rx", 0
 
+mood_chill: db 27,'[38;5;51m',0
+mood_grind: db 27,'[38;5;226m',0
+mood_chaos: db 27,'[38;5;201m',0
+mood_intense: db 27,'[38;5;196m',0
 
 
 
