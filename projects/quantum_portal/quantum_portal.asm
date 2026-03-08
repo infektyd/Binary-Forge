@@ -102,7 +102,20 @@ _start:
     cmp al, 'q'
     je .exit_ok
 
+    call is_help_cmd
+    test eax, eax
+    jz .process_input
+    call show_help
+    jmp .main_loop
+
 .process_input:
+    call is_help_cmd
+    test eax, eax
+    jz .process_input_real
+    call show_help
+    jmp .main_loop
+
+.process_input_real:
     call setup_abstract_socket
     test rax, rax
     js .exit_ok                        ; connection failed (or close, but js catches neg err)
@@ -569,6 +582,48 @@ restore_termios:
     syscall
     ret
 
+is_help_cmd:
+    lea rsi, [r14 + OFF_INPUT]
+    mov al, [rsi]
+    cmp al, '/'
+    jne .dash
+    cmp byte [rsi + 1], 'h'
+    jne .no
+    cmp byte [rsi + 2], 'e'
+    jne .no
+    cmp byte [rsi + 3], 'l'
+    jne .no
+    cmp byte [rsi + 4], 'p'
+    jne .no
+    mov eax, 1
+    ret
+.dash:
+    cmp al, '-'
+    jne .no
+    cmp byte [rsi + 1], 'h'
+    je .yes
+    cmp byte [rsi + 1], '-'
+    jne .no
+    cmp byte [rsi + 2], 'h'
+    jne .no
+    cmp byte [rsi + 3], 'e'
+    jne .no
+    cmp byte [rsi + 4], 'l'
+    jne .no
+    cmp byte [rsi + 5], 'p'
+    jne .no
+.yes:
+    mov eax, 1
+    ret
+.no:
+    xor eax, eax
+    ret
+
+show_help:
+    lea rsi, [rel help_text]
+    call write_stdout_z
+    ret
+
 ; ---------------- data ----------------
 
 ansi_clear: db 27, '[2J', 27, '[H', 0
@@ -619,6 +674,8 @@ mood_chill: db 27,'[38;5;51m',0
 mood_grind: db 27,'[38;5;226m',0
 mood_chaos: db 27,'[38;5;201m',0
 mood_intense: db 27,'[38;5;196m',0
+
+help_text: db 10,'Commands: q quit | 1-4 presets | /help -h --help',10,0
 
 
 
