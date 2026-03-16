@@ -25,7 +25,7 @@ URL_HOST  = "api.x.ai"
 URL_PATH  = "/v1/responses"
 SERIAL_PORT = "/dev/ttyUSB0"
 BAUD      = 115200
-TRANSCRIPT = "/home/infektyd/.openclaw/workspace/memory/grok_printer_session.md"
+TRANSCRIPT = "/home/user/.openclaw/workspace/memory/grok_printer_session.md"
 
 if not XAI_KEY:
     raise SystemExit("FATAL: XAI_API_KEY not set")

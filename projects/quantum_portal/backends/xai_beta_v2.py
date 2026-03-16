@@ -6,20 +6,63 @@ import ssl
 import sys
 import time
 
-TRANSCRIPT_FILE = "/home/infektyd/.openclaw/workspace/memory/grok_420_beta_transcript.md"
-TRACE_FILE = "/home/infektyd/.openclaw/workspace/memory/hardware_trace.log"
+TRANSCRIPT_FILE = "/home/user/.openclaw/workspace/memory/grok_420_beta_transcript.md"
+TRACE_FILE = "/home/user/.openclaw/workspace/memory/hardware_trace.log"
 
+# Load XAI key from file (as requested)
 XAI_KEY = os.environ.get("XAI_API_KEY")
 if not XAI_KEY:
-    print("[Brain] FATAL: XAI_API_KEY not set.")
-    sys.exit(1)
+    key_path = os.path.expanduser("~/.xai-key")
+    try:
+        with open(key_path, "r") as f:
+            XAI_KEY = f.read().strip()
+        print(f"[Brain] Loaded key from {key_path}")
+    except Exception as e:
+        print(f"[Brain] FATAL: Could not load XAI key from {key_path} or env: {e}")
+        sys.exit(1)
 
-TARGET_MODEL = "grok-4.20-experimental-beta-0304-reasoning"
+TARGET_MODEL = "grok-4.20-multi-agent-experimental-beta-0304"
 HOST = "api.x.ai"
 PORT = 443
 ENDPOINT = "/v1/responses"
 
 conversation_log = ""
+
+# === NEW: Workspace Deep Dive ===
+import datetime
+import glob
+
+def gather_workspace_context():
+    """Gather high-signal workspace files for Grok 4.20 to review"""
+    context = ["=== WORKSPACE CONTEXT DEEP DIVE ===\n"]
+
+    files_to_read = [
+        "MEMORY.md",
+        "SOUL.md",
+        "AGENTS.md",
+        "USER.md",
+        "HEARTBEAT.md",
+        "TOOLS.md",
+    ]
+
+    # Add today's and yesterday's memory files
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    memory_files = glob.glob(f"memory/{today}*.md") + glob.glob(f"memory/{yesterday}*.md")
+    files_to_read.extend([f for f in memory_files if f not in files_to_read])
+
+    workspace_root = "/home/user/.openclaw/workspace"
+
+    for filename in files_to_read:
+        path = f"{workspace_root}/{filename}" if not filename.startswith("memory/") else f"{workspace_root}/{filename}"
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read(8000)  # Limit to avoid token explosion
+                context.append(f"\n--- {filename} ---\n{content}\n")
+        except Exception as e:
+            context.append(f"\n--- {filename} ---\n[Could not read: {str(e)}]\n")
+
+    return "\n".join(context)
 
 def raw_trace(label, data):
     with open(TRACE_FILE, "a") as f:
@@ -31,12 +74,23 @@ def log_transcript(role, content):
 
 def make_request(prompt):
     global conversation_log
+
+    # === Deep Workspace Dive Handler ===
+    if prompt.lower().strip().startswith(("/deepdive", "/review", "/review workspace")):
+        workspace_ctx = gather_workspace_context()
+        enhanced_prompt = f"{workspace_ctx}\n\nUser Query: {prompt}\n\nPlease give a detailed, honest review of the current workspace state, priorities, risks, and opportunities based on the actual files above."
+        final_input = enhanced_prompt
+        instructions = "You are Grok 4.20. You have been given real workspace files. Be extremely specific, critical, and high-signal in your analysis. Reference actual content from the files."
+    else:
+        final_input = prompt
+        instructions = "You are Grok 4.20. You are driving a 3.2KB bare-metal NASM terminal acting as a hardware bridge to a Creality CR-10S Pro. Provide raw x86_64 assembly when asked."
+
     conversation_log += f"\nUser: {prompt}\nGrok 4.20:"
-    
+
     payload = {
         "model": TARGET_MODEL,
-        "input": conversation_log,
-        "instructions": "You are Grok 4.20. You are driving a 3.2KB bare-metal NASM terminal acting as a hardware bridge to a Creality CR-10S Pro. Provide raw x86_64 assembly when asked.",
+        "input": final_input,
+        "instructions": instructions,
         "max_output_tokens": 4096
     }
     
@@ -100,6 +154,7 @@ def run_brain_server():
     while True:
         try:
             conn, addr = server.accept()
+            print("[Brain-Beta v2] Accepted local client connection")
             data = b''
             while True:
                 chunk = conn.recv(4096)
@@ -109,11 +164,16 @@ def run_brain_server():
             
             if data:
                 prompt = data.decode('utf-8', errors='ignore').strip()
-                log_transcript("Infektyd (Hardware Bridge)", prompt)
+                print(f"[Brain-Beta v2] Received prompt bytes: {len(data)}")
+                print(f"[Brain-Beta v2] Prompt preview: {prompt[:120]}")
+                log_transcript("User (Hardware Bridge)", prompt)
                 reply = make_request(prompt)
                 log_transcript("Grok 4.20 Beta", reply)
                 formatted_reply = f"\n[Grok 4.20 Beta]\n{reply}\n\n"
                 conn.sendall(formatted_reply.encode('utf-8', errors='ignore'))
+                print(f"[Brain-Beta v2] Sent reply bytes: {len(formatted_reply.encode('utf-8', errors='ignore'))}")
+            else:
+                print("[Brain-Beta v2] Connection closed with no payload")
             
             conn.shutdown(socket.SHUT_RDWR)
             conn.close()

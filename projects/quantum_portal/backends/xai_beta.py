@@ -10,7 +10,7 @@ import time
 
 PIPE_TX = "/tmp/qp_tx"
 PIPE_RX = "/tmp/qp_rx"
-TRANSCRIPT_FILE = "/home/infektyd/.openclaw/workspace/memory/grok_420_beta_transcript.md"
+TRANSCRIPT_FILE = "/home/user/.openclaw/workspace/memory/grok_420_beta_transcript.md"
 
 XAI_KEY = os.environ.get("XAI_API_KEY", "your-api-key-here")
 if not XAI_KEY:
@@ -110,7 +110,7 @@ def start_daemon():
                 user_msg = f_in.read().strip()
                 if user_msg:
                     print(f"\n[Glass] {user_msg}")
-                    log_transcript("Infektyd", user_msg)
+                    log_transcript("User", user_msg)
                     
                     reply = make_request(user_msg)
                     log_transcript("Grok 4.20 Beta", reply)

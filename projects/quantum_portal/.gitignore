@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+env/
+
+# Compiled Binaries & Object Files
+*.o
+*.hex
+*.hex.wrap
+*.bin
+quantum_portal
+quantum_portal_new
+serial
+snapshots/quantum_portal_v1
+snapshots/quantum_portal_v1_tui
+
+# Logs and Debug
+*.log
+strace.log
+
+# OS
+.DS_Store

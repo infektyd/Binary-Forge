@@ -1,37 +1,47 @@
 # Quantum Portal
 
-A hyper-optimized, 3.1KB x86_64 raw NASM Terminal User Interface (TUI) acting as an instant "Glass" layer for AI models, backed by a modular Python daemon via UNIX pipes.
+Quantum Portal is a 3.1KB x86_64 NASM executable providing a lightweight TUI interface for AI models. It employs a decoupled "Glass & Brain" architecture using abstract UNIX sockets for communication, ensuring zero libc dependencies in the frontend.
 
-## The "Glass & Brain" Architecture
+## Architecture
 
-Large Language Models often suffer from "Prompt Override" when orchestrators inject thousands of tokens of invisible system preamble. To fix this, Quantum Portal physically decouples the Terminal UI from the Networking/API layer using a classic Hourglass IPC model:
+The system consists of two components:
 
-1. **The Glass (`quantum_portal`):** A 3.1KB hand-crafted ELF NASM executable. It uses pure Linux syscalls (no libc). It paints the screen, captures keystrokes, and reads/writes to UNIX pipes (`/tmp/qp_tx` and `/tmp/qp_rx`).
-2. **The Brain (`backends/openrouter_generic.py`):** A lightweight Python daemon that waits silently (0% CPU). When the TUI pipe fires, Python handles the TLS 1.3 handshake, routes the JSON to the AI API, appends conversation history, and pipes the raw text back.
+- **Glass (`quantum_portal`)**: A hand-crafted NASM binary using only Linux syscalls. It manages the terminal UI, keyboard input, screen rendering, and bidirectional communication over an abstract UNIX socket (`\0grok_socket`).
+- **Brain (Python backend)**: A pluggable daemon that handles API authentication, network requests, JSON processing, and response streaming. The backend connects to the socket and exchanges raw text with the Glass component.
 
-The AI receives *exactly* what you type. Zero preamble.
+This separation ensures UI responsiveness during network operations and provides complete control over prompts sent to the model.
 
-## Build Requirements
-- `nasm`
-- Linux x86_64 (Tested on Pop!_OS)
+## Features
+
+- Zero libc frontend (pure syscalls)
+- Abstract UNIX socket IPC (no filesystem artifacts)
+- Modular backends for multiple AI providers (xAI, OpenRouter, etc.)
+- Tabbed TUI interface
+- Efficient prompt handling without injected system preambles
+
+## Requirements
+
+- nasm
+- Linux x86_64
 
 ## Quick Start
 
-1. **Start the Brain (Terminal 1)**
-```bash
-export OPENROUTER_API_KEY="sk-or-v1-..."
-python3 backends/openrouter_generic.py
-```
-*(The daemon will create the `/tmp/qp_tx` and `/tmp/qp_rx` named pipes and wait)*
+1. Start the backend:
+   ```bash
+   cd /path/to/quantum_portal
+   export XAI_API_KEY="xai-..."
+   python3 backends/xai_beta_v2.py
+   ```
 
-2. **Compile and Run the Glass (Terminal 2)**
-```bash
-nasm -f bin quantum_portal.asm -o quantum_portal
-chmod +x quantum_portal
-./quantum_portal
-```
+2. Build and run the frontend (in another terminal):
+   ```bash
+   nasm -f bin quantum_portal.asm -o quantum_portal
+   chmod +x quantum_portal
+   ./quantum_portal
+   ```
 
-## Customization (Bring Your Own Brain)
-Because the NASM binary uses non-blocking Unix Pipes, you can replace the Python backend with anything. You can write a Go router, a Rust daemon, or a local RAG vector-database pipeline. As long as your backend reads from `/tmp/qp_tx` and writes text to `/tmp/qp_rx`, the 3KB NASM UI will render it instantly. 
+## Backend Customization
 
-See `ARCHITECTURE_DECISION.md` for low-level IPC implementation details.
+The socket-based interface allows any compatible backend (Python, Rust, Go) to be substituted. The backend must bind to the abstract socket and implement read/write handling for prompts and responses.
+
+See `ARCHITECTURE_DECISION.md` for detailed technical specifications.
