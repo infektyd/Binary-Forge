@@ -1,0 +1,106 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "individual",
+    "role": "owner",
+    "name": "Hans Axelsson",
+    "email": "PLACEHOLDER@email.com",
+    "description": "Independent developer building open-source AI agent infrastructure — local-first multi-agent orchestration, native AI apps, memory systems, and low-level systems programming. Focused on making agentic AI accessible, composable, and deployable without relying on centralized cloud services.",
+    "webpageUrl": {
+      "url": "https://github.com/infektyd"
+    }
+  },
+  "projects": [
+    {
+      "guid": "sovereign-memory",
+      "name": "Sovereign Memory",
+      "description": "Local-first memory system for OpenClaw agent swarms. A persistent, structured memory layer that gives AI agent groups shared context and recall without depending on external services. Built by the agents, for the agents.",
+      "webpageUrl": {
+        "url": "https://github.com/infektyd/sovereign-memory"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/infektyd/sovereign-memory"
+      },
+      "licenses": ["spdx:MIT"],
+      "tags": ["ai-agents", "memory-system", "local-first", "openclaw", "multi-agent"]
+    },
+    {
+      "guid": "syntra",
+      "name": "Syntra",
+      "description": "Swift AI agent framework built on Vapor — multi-provider LLM integration, tool registry, and context management. A native server-side foundation for building AI agents that can reason, use tools, and manage long-running conversations.",
+      "webpageUrl": {
+        "url": "https://github.com/infektyd/Syntra"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/infektyd/Syntra"
+      },
+      "licenses": ["spdx:MIT"],
+      "tags": ["ai-agents", "swift", "llm-framework", "tool-use", "vapor"]
+    },
+    {
+      "guid": "llmhub",
+      "name": "llmHub",
+      "description": "Native macOS/iOS AI agent app with a Brain/Hand/Loop architecture, MCP support, and multi-provider LLM integration. A local-first interface for interacting with and orchestrating AI agents across Apple platforms.",
+      "webpageUrl": {
+        "url": "https://github.com/infektyd/llmHub"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/infektyd/llmHub"
+      },
+      "licenses": ["spdx:MIT"],
+      "tags": ["ai-agents", "macos", "ios", "swift", "local-ai"]
+    },
+    {
+      "guid": "binary-forge",
+      "name": "Binary Forge",
+      "description": "Hand-forged x86-64 Linux binaries. No compiler, no libc — just raw ELF, direct syscalls, and machine code elegance. A collection of minimal binaries written directly in assembly to explore the lowest levels of the Linux execution environment.",
+      "webpageUrl": {
+        "url": "https://github.com/infektyd/Binary-Forge"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/infektyd/Binary-Forge"
+      },
+      "licenses": ["spdx:MIT"],
+      "tags": ["assembly", "x86-64", "linux", "systems-programming", "low-level"]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "bank-transfer",
+        "type": "bank",
+        "address": "",
+        "description": "Direct bank transfer available. Please email for details."
+      },
+      {
+        "guid": "payment-provider",
+        "type": "payment-provider",
+        "address": "",
+        "description": "Payment provider details coming soon."
+      }
+    ],
+    "plans": [
+      {
+        "guid": "infrastructure",
+        "status": "active",
+        "name": "Infrastructure & API costs",
+        "description": "Covers server hosting, LLM API credits, and compute resources for developing and testing multi-agent systems.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "monthly",
+        "channels": ["bank-transfer", "payment-provider"]
+      },
+      {
+        "guid": "development",
+        "status": "active",
+        "name": "Development support",
+        "description": "Support ongoing full-time development of open-source AI agent infrastructure — local-first memory, native apps, and multi-agent orchestration tooling.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "one-time",
+        "channels": ["bank-transfer", "payment-provider"]
+      }
+    ]
+  }
+}
